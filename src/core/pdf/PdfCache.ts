@@ -66,6 +66,8 @@ export class PdfCacheManager {
         editor: Editor,
         shapeId: string
     ): Promise<void> {
+        if (!pdfWorkerManager.isLoaded()) return;
+
         const renderScale = scale * targetDpr;
         const key = this.getCacheKey(pageIndex, renderScale);
         if (this.cache.has(key) || this.rendering.has(key)) return;
@@ -122,6 +124,8 @@ export class PdfCacheManager {
      * Used by CameraTool before export to ensure retina-quality textures.
      */
     public async preloadHighRes(pageIndices: number[], scale: number): Promise<void> {
+        if (!pdfWorkerManager.isLoaded()) return;
+
         for (const index of pageIndices) {
             const key = this.getCacheKey(index, scale);
             if (!this.cache.has(key) && !this.rendering.has(key)) {
