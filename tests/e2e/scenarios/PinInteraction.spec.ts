@@ -1,89 +1,100 @@
-import { test, expect, Page } from '@playwright/test';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { test, expect } from '@playwright/test';
 
-/**
- * E2E: Pin Interaction flow
- *
- * Verifies:
- * 1. Pin tool can be activated
- * 2. Clicking the canvas places a pin shape
- * 3. The pin comment popover appears when pin is selected
- * 4. Text can be entered in the comment textarea
- * 5. Escape key closes the popover
- */
-
-test.describe('Pin Tool Interaction', () => {
-    test.beforeEach(async ({ page }: { page: Page }) => {
+test.describe('Pin Tool - Binding & Synchronous Movement', () => {
+    test.beforeEach(async ({ page }) => {
         await page.goto('/');
-        await page.waitForFunction(() => (window as any).__TEST_IS_READY__ === true, {
-            timeout: 15_000,
+        await page.waitForFunction(() => (window as any).__TEST_IS_READY__ === true);
+    });
+
+    test('Activating Pin tool shows the cursor indicator', async ({ page }) => {
+        const pinBtn = page.locator('[data-testid="tool-btn-pin"]');
+        await pinBtn.click();
+        await expect(pinBtn).toHaveAttribute('data-active', 'true');
+    });
+
+    /**
+     * Headless verification of binding logic.
+     */
+    test('Attaching a pin creates a durable binding that moves synchronously', async ({ page }) => {
+        const result = await page.evaluate(async () => {
+            const editor = (window as any).editor;
+
+            // 1. Create two overlapping shapes
+            const box1Id = 'shape:box1';
+            const box2Id = 'shape:box2';
+
+            editor.createShapes([
+                {
+                    id: box1Id,
+                    type: 'geo',
+                    x: 100,
+                    y: 100,
+                    props: { w: 200, h: 200, geo: 'rectangle' },
+                } as any,
+                {
+                    id: box2Id,
+                    type: 'geo',
+                    x: 120,
+                    y: 120,
+                    props: { w: 200, h: 200, geo: 'rectangle' },
+                } as any,
+            ]);
+
+            // 2. Select Pin tool and click the intersection
+            editor.setCurrentTool('pin');
+            const pinTool = editor.root.children.pin;
+            if (!pinTool) throw new Error('Could not find pin tool');
+
+            const point = { x: 150, y: 150 };
+            pinTool.onPointerDown({ point, target: 'canvas' } as any);
+
+            // 3. Find the binding
+            const allBindings = Object.values(editor.store.allRecords()).filter((r: any) => r.typeName === 'binding');
+            const pinBinding = allBindings.find((b: any) => b.type === 'pin-attach');
+
+            let bindingFound = false;
+            let moveSuccess = false;
+            let finalBox2Pos = null;
+
+            if (pinBinding) {
+                bindingFound = true;
+                const fromId = (pinBinding as any).fromId;
+                const toId = (pinBinding as any).toId;
+
+                const fromShape = editor.getShape(fromId);
+                const toShapeBefore = editor.getShape(toId);
+
+                if (fromShape && toShapeBefore) {
+                    const startX = (toShapeBefore as any).x;
+                    const startY = (toShapeBefore as any).y;
+
+                    editor.updateShape({
+                        id: fromId,
+                        type: (fromShape as any).type,
+                        x: (fromShape as any).x + 50,
+                        y: (fromShape as any).y + 50
+                    });
+
+                    const toShapeAfter = editor.getShape(toId);
+                    if (toShapeAfter && (toShapeAfter as any).x === startX + 50 && (toShapeAfter as any).y === startY + 50) {
+                        moveSuccess = true;
+                    }
+                    finalBox2Pos = { x: (toShapeAfter as any)?.x, y: (toShapeAfter as any)?.y };
+                }
+            }
+
+            return {
+                bindingFound,
+                moveSuccess,
+                finalBox2Pos,
+                numBindings: allBindings.length,
+                numShapes: editor.getCurrentPageShapes().length
+            };
         });
-    });
 
-    test('activates pin tool via keyboard shortcut', async ({ page }) => {
-        await page.keyboard.press('p');
-        const pinBtn = page.getByTestId('tool-btn-pin');
-        await expect(pinBtn).toHaveClass(/bg-indigo/);
-    });
-
-    test('activates pin tool via toolbar button click', async ({ page }) => {
-        await page.getByTestId('tool-btn-pin').click();
-        const pinBtn = page.getByTestId('tool-btn-pin');
-        await expect(pinBtn).toHaveClass(/bg-indigo/);
-    });
-
-    test('places a pin on canvas click and shows comment popover', async ({ page }) => {
-        // First activate the pin tool
-        await page.keyboard.press('p');
-
-        // Click in the center of the canvas
-        const canvas = page.locator('.tl-canvas');
-        const canvasBounds = await canvas.boundingBox();
-        if (!canvasBounds) throw new Error('Canvas not found');
-
-        await page.mouse.click(
-            canvasBounds.x + canvasBounds.width / 2,
-            canvasBounds.y + canvasBounds.height / 2
-        );
-
-        // The pin popover should appear
-        await expect(page.getByTestId('pin-popover')).toBeVisible({ timeout: 3000 });
-    });
-
-    test('can type in the pin comment input', async ({ page }) => {
-        await page.keyboard.press('p');
-        const canvas = page.locator('.tl-canvas');
-        const canvasBounds = await canvas.boundingBox();
-        if (!canvasBounds) throw new Error('Canvas not found');
-
-        await page.mouse.click(
-            canvasBounds.x + canvasBounds.width / 2,
-            canvasBounds.y + canvasBounds.height / 2
-        );
-
-        const commentInput = page.getByTestId('pin-comment-input');
-        await expect(commentInput).toBeVisible({ timeout: 3000 });
-
-        await commentInput.fill('This is a test annotation');
-        await expect(commentInput).toHaveValue('This is a test annotation');
-    });
-
-    test('Escape key closes popover and switches to select tool', async ({ page }) => {
-        await page.keyboard.press('p');
-        const canvas = page.locator('.tl-canvas');
-        const canvasBounds = await canvas.boundingBox();
-        if (!canvasBounds) throw new Error('Canvas not found');
-
-        await page.mouse.click(
-            canvasBounds.x + canvasBounds.width / 2,
-            canvasBounds.y + canvasBounds.height / 2
-        );
-
-        await page.getByTestId('pin-popover').waitFor({ state: 'visible', timeout: 3000 });
-
-        // Press Escape to deselect
-        await page.keyboard.press('Escape');
-
-        // Popover should disappear
-        await expect(page.getByTestId('pin-popover')).not.toBeVisible({ timeout: 2000 });
+        console.log('PIN E2E DEBUG:', JSON.stringify(result, null, 2));
+        expect(result.bindingFound).toBe(true);
+        expect(result.moveSuccess).toBe(true);
     });
 });

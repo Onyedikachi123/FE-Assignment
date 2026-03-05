@@ -14,28 +14,15 @@ export type TLPdfPageShape = TLBaseShape<
 
 /**
  * PdfPageShapeUtil
- *
- * CRITICAL ADDITIONS:
- * 1. toSvgElement() — enables Camera Tool export to capture PDF pages.
- *    Encodes the cached ImageBitmap as a base64 PNG embedded in an SVG <image>.
- *
- * 2. Viewport virtualisation — only requests renders for shapes that are
- *    currently visible in the tldraw camera viewport. Off-screen pages stay
- *    as skeletons, preventing simultaneous mass renders on large documents.
- *
- * 3. Error state — renders a styled error box for corrupted pages instead
- *    of crashing the entire canvas.
- *
- * 4. Retina-aware canvas ref — draws the bitmap imperatively without state.
  */
-export class PdfPageShapeUtil extends BaseBoxShapeUtil<any> {
+export class PdfPageShapeUtil extends BaseBoxShapeUtil<TLPdfPageShape> {
     static override type = 'pdf-page' as const;
 
     override getDefaultProps(): TLPdfPageShape['props'] {
-        return { w: 595, h: 842, pageIndex: 1, error: false }; // A4 default dimensions
+        return { w: 595, h: 842, pageIndex: 1, error: false };
     }
 
-    override component(shape: any) {
+    override component(shape: TLPdfPageShape) {
         const { w, h, pageIndex, error } = shape.props;
         const editor = this.editor;
 
@@ -64,19 +51,18 @@ export class PdfPageShapeUtil extends BaseBoxShapeUtil<any> {
         const scale = editor.getCamera().z;
         const renderScale = scale * dpr;
 
-        // --- Viewport virtualisation: only request render for visible pages ---
         const viewportBounds = editor.getViewportPageBounds();
-        const shapeBounds = editor.getShapePageBounds(shape);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const shapeBounds = editor.getShapePageBounds(shape as any);
         const isInViewport = shapeBounds ? viewportBounds.collides(shapeBounds) : false;
 
         const bitmap = pdfCacheManager.getCachedBitmap(pageIndex, renderScale);
         const isPdfLoaded = pdfWorkerManager.isLoaded();
 
         if (!bitmap && isInViewport && isPdfLoaded) {
-            // Fire-and-forget: cache manager will call updateShape when done
             pdfCacheManager.requestRender(pageIndex, scale, dpr, editor, shape.id).catch(() => {
-                // Mark this shape as errored so users get visual feedback
-                editor.updateShape({ id: shape.id, type: 'pdf-page' as any, props: { ...shape.props, error: true } });
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                editor.updateShape({ id: shape.id, type: 'pdf-page', props: { ...shape.props, error: true } } as any);
             });
         }
 
@@ -98,7 +84,6 @@ export class PdfPageShapeUtil extends BaseBoxShapeUtil<any> {
                                 gap: 12, color: '#94a3b8',
                             }}
                         >
-                            {/* Animated skeleton shimmer */}
                             <div style={{ width: '80%', height: 12, borderRadius: 6, background: 'linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
                             <div style={{ width: '60%', height: 12, borderRadius: 6, background: 'linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite 0.2s' }} />
                             <span style={{ fontSize: 13, marginTop: 8 }}>
@@ -125,26 +110,15 @@ export class PdfPageShapeUtil extends BaseBoxShapeUtil<any> {
         );
     }
 
-    /**
-     * toSvgElement() — CRITICAL for Camera Tool export.
-     *
-     * tldraw's getSvgString() serialises shapes via SVG. HTMLContainer-based
-     * shapes return nothing by default, producing blank rectangles in exports.
-     *
-     * We override this to encode the cached ImageBitmap as a base64 PNG
-     * and embed it as an SVG <image> element — giving the Camera Tool a
-     * pixel-perfect, retina-quality representation of the PDF page.
-     */
-    async toSvgElement(shape: any): Promise<SVGElement | null> {
+    async toSvgElement(shape: TLPdfPageShape): Promise<SVGElement | null> {
         const { w, h, pageIndex } = shape.props;
 
-        // Try to get a high-res bitmap at 2× scale for export quality
-        const bitmap =
-            pdfCacheManager.getCachedBitmap(pageIndex, 2) ??
-            pdfCacheManager.getCachedBitmap(pageIndex, 1);
+        let bitmap = await pdfCacheManager.waitForHighRes(pageIndex, 2);
+        if (!bitmap) {
+            bitmap = await pdfCacheManager.waitForHighRes(pageIndex, 1);
+        }
 
         if (!bitmap) {
-            // Render a placeholder rect if no bitmap is available
             const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
             rect.setAttribute('width', String(toDomPrecision(w)));
             rect.setAttribute('height', String(toDomPrecision(h)));
@@ -152,7 +126,6 @@ export class PdfPageShapeUtil extends BaseBoxShapeUtil<any> {
             return rect;
         }
 
-        // Draw bitmap to an offscreen canvas, extract as base64 PNG
         const canvas = document.createElement('canvas');
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
@@ -168,7 +141,7 @@ export class PdfPageShapeUtil extends BaseBoxShapeUtil<any> {
         return imageEl;
     }
 
-    override indicator(shape: any) {
+    override indicator(shape: TLPdfPageShape) {
         return <rect width={shape.props.w} height={shape.props.h} fill="none" rx="2" ry="2" />;
     }
 }

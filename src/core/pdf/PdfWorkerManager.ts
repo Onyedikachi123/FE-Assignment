@@ -8,18 +8,11 @@ export interface PdfPageRawDims {
 
 /**
  * PdfWorkerManager
- *
- * Singleton that owns the pdf.js document proxy.
- * Guarantees the previous document is destroyed before a new one loads
- * to prevent orphaned worker memory.
- *
- * page.cleanup() is called after every render to release internal
- * pdf.js resources (operator lists, display lists) that accumulate
- * silently and cause memory bloat on long sessions.
  */
 export class PdfWorkerManager {
     private static instance: PdfWorkerManager;
     private proxy: pdfjsLib.PDFDocumentProxy | null = null;
+    private loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
 
     private constructor() {
         if (typeof window !== 'undefined') {
@@ -39,36 +32,41 @@ export class PdfWorkerManager {
     }
 
     public async loadDocument(
-        arrayBuffer: ArrayBuffer
+        arrayBuffer: ArrayBuffer,
+        onProgress?: (loaded: number, total: number) => void
     ): Promise<{ numPages: number; pagesDims: PdfPageRawDims[] }> {
-        // Destroy previous document to prevent worker memory leak
+        // Destroy previous tasks
+        if (this.loadingTask) {
+            try { await this.loadingTask.destroy(); } catch { /* ignore */ }
+            this.loadingTask = null;
+        }
         if (this.proxy) {
-            await this.proxy.destroy();
+            try { await this.proxy.destroy(); } catch { /* ignore */ }
             this.proxy = null;
         }
 
         const data = new Uint8Array(arrayBuffer);
-        const loadingTask = pdfjsLib.getDocument({ data });
-        this.proxy = await loadingTask.promise;
+        this.loadingTask = pdfjsLib.getDocument({ data });
+        this.proxy = await this.loadingTask.promise;
 
-        const numPages = this.proxy.numPages;
+        const currentProxy = this.proxy;
+        const numPages = currentProxy.numPages;
         const pagesDims: PdfPageRawDims[] = [];
 
         for (let i = 1; i <= numPages; i++) {
-            const page = await this.proxy.getPage(i);
+            if (this.proxy !== currentProxy) break;
+
+            const page = await currentProxy.getPage(i);
             const viewport = page.getViewport({ scale: 1 });
             pagesDims.push({ pageIndex: i, width: viewport.width, height: viewport.height });
-            page.cleanup(); // Release internal operator list / display list resources
+            page.cleanup();
+
+            if (onProgress) onProgress(i, numPages);
         }
 
         return { numPages, pagesDims };
     }
 
-    /**
-     * Renders a PDF page to an ImageBitmap using OffscreenCanvas.
-     * Returns the bitmap with ownership transferred (zero-copy).
-     * Calls page.cleanup() after render to prevent resource accumulation.
-     */
     public async renderPageToOffscreen(pageIndex: number, scale: number): Promise<ImageBitmap> {
         if (!this.proxy) throw new Error('[PdfWorkerManager] No PDF loaded');
 
@@ -77,28 +75,34 @@ export class PdfWorkerManager {
 
         try {
             if (typeof OffscreenCanvas === 'undefined') {
-                // Safari / older browser fallback
                 const canvas = document.createElement('canvas');
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
                 const context = canvas.getContext('2d')!;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 await page.render({ canvasContext: context as any, viewport, canvas: canvas as any }).promise;
                 return createImageBitmap(canvas);
             }
 
             const canvas = new OffscreenCanvas(viewport.width, viewport.height);
             const context = canvas.getContext('2d')!;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await page.render({ canvasContext: context as any, viewport, canvas: canvas as any }).promise;
             return canvas.transferToImageBitmap();
         } finally {
-            // CRITICAL: release pdf.js internal render resources
             page.cleanup();
         }
     }
 
     public destroy(): void {
-        this.proxy?.destroy();
-        this.proxy = null;
+        if (this.loadingTask) {
+            try { this.loadingTask.destroy(); } catch { /* ignore */ }
+            this.loadingTask = null;
+        }
+        if (this.proxy) {
+            try { this.proxy.destroy(); } catch { /* ignore */ }
+            this.proxy = null;
+        }
     }
 }
 

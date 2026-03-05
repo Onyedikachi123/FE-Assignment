@@ -1,22 +1,13 @@
 import { pdfWorkerManager } from './PdfWorkerManager';
-import { Editor } from 'tldraw';
+import { Editor, TLShapeId } from 'tldraw';
 
 /**
  * PdfCacheManager
- *
- * Singleton LRU cache for rendered PDF page ImageBitmaps.
- * Cache key: `${pageIndex}_${scale.toFixed(2)}`
- * Max cached bitmaps: 20 (evicts oldest on overflow).
- *
- * zoom strategy: requestRender is idempotent (deduped by rendering Set).
- * invalidateAndRerender forces eviction + fresh render — used by the
- * debounced zoom handler to get sharp textures after zoom settles.
  */
 export class PdfCacheManager {
     private static instance: PdfCacheManager;
-    // LRU: Map insertion order is guaranteed by spec, oldest entry = first key.
     private cache = new Map<string, ImageBitmap>();
-    private rendering = new Set<string>();
+    private rendering = new Map<string, Promise<ImageBitmap>>();
     private static readonly MAX_CACHE_SIZE = 20;
 
     private constructor() { }
@@ -32,21 +23,15 @@ export class PdfCacheManager {
         return `${pageIndex}_${scale.toFixed(2)}`;
     }
 
-    /**
-     * Returns a cached bitmap for the given page + scale.
-     * Falls back to any available resolution for the page (best-effort).
-     */
     public getCachedBitmap(pageIndex: number, scale: number): ImageBitmap | undefined {
         const key = this.getCacheKey(pageIndex, scale);
         const exact = this.cache.get(key);
         if (exact) {
-            // Refresh LRU position
             this.cache.delete(key);
             this.cache.set(key, exact);
             return exact;
         }
 
-        // Fallback: return any cached resolution for this page
         for (const [k, v] of this.cache.entries()) {
             if (k.startsWith(`${pageIndex}_`)) {
                 return v;
@@ -55,16 +40,12 @@ export class PdfCacheManager {
         return undefined;
     }
 
-    /**
-     * Request an async render if not already cached or in-flight.
-     * Safe to call on every render — idempotent.
-     */
     public async requestRender(
         pageIndex: number,
         scale: number,
         targetDpr: number,
         editor: Editor,
-        shapeId: string
+        shapeId: TLShapeId
     ): Promise<void> {
         if (!pdfWorkerManager.isLoaded()) return;
 
@@ -72,15 +53,17 @@ export class PdfCacheManager {
         const key = this.getCacheKey(pageIndex, renderScale);
         if (this.cache.has(key) || this.rendering.has(key)) return;
 
-        this.rendering.add(key);
+        const promise = pdfWorkerManager.renderPageToOffscreen(pageIndex, renderScale);
+        this.rendering.set(key, promise);
+
         try {
-            const bitmap = await pdfWorkerManager.renderPageToOffscreen(pageIndex, renderScale);
+            const bitmap = await promise;
             this.cache.set(key, bitmap);
 
-            // Surgically invalidate only this shape so tldraw repaints it
-            const shape = editor.getShape(shapeId as any);
+            const shape = editor.getShape(shapeId);
             if (shape) {
-                editor.updateShape({ id: shapeId as any, type: 'pdf-page' as any });
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                editor.updateShape({ id: shapeId, type: 'pdf-page' } as any);
             }
             this.evictStale();
         } catch (err) {
@@ -90,18 +73,26 @@ export class PdfCacheManager {
         }
     }
 
-    /**
-     * Used by the debounced zoom handler.
-     * Evicts all resolutions for a page and fires a fresh render at the new scale.
-     */
+    public async waitForHighRes(pageIndex: number, scale: number): Promise<ImageBitmap | undefined> {
+        const key = this.getCacheKey(pageIndex, scale);
+        const inFlight = this.rendering.get(key);
+        if (inFlight) {
+            try {
+                return await inFlight;
+            } catch {
+                return undefined;
+            }
+        }
+        return this.getCachedBitmap(pageIndex, scale);
+    }
+
     public async invalidateAndRerender(
         pageIndex: number,
         scale: number,
         targetDpr: number,
         editor: Editor,
-        shapeId: string
+        shapeId: TLShapeId
     ): Promise<void> {
-        // Evict all cached resolutions for this page
         for (const key of Array.from(this.cache.keys())) {
             if (key.startsWith(`${pageIndex}_`)) {
                 const bmp = this.cache.get(key);
@@ -109,40 +100,44 @@ export class PdfCacheManager {
                 this.cache.delete(key);
             }
         }
-        // Also clear any in-flight renders for this page
-        for (const key of Array.from(this.rendering)) {
+        for (const key of Array.from(this.rendering.keys())) {
             if (key.startsWith(`${pageIndex}_`)) {
                 this.rendering.delete(key);
             }
         }
-        // Now request a fresh high-quality render
         await this.requestRender(pageIndex, scale, targetDpr, editor, shapeId);
     }
 
-    /**
-     * Preloads high-resolution bitmaps for a set of page indices.
-     * Used by CameraTool before export to ensure retina-quality textures.
-     */
     public async preloadHighRes(pageIndices: number[], scale: number): Promise<void> {
         if (!pdfWorkerManager.isLoaded()) return;
+
+        const promises: Promise<void>[] = [];
 
         for (const index of pageIndices) {
             const key = this.getCacheKey(index, scale);
             if (!this.cache.has(key) && !this.rendering.has(key)) {
-                this.rendering.add(key);
-                try {
-                    const bitmap = await pdfWorkerManager.renderPageToOffscreen(index, scale);
-                    this.cache.set(key, bitmap);
-                } catch (e) {
-                    console.error('[PdfCache] Failed preloadHighRes for page', index, e);
-                } finally {
-                    this.rendering.delete(key);
-                }
+                const renderPromise = pdfWorkerManager.renderPageToOffscreen(index, scale);
+                this.rendering.set(key, renderPromise);
+                promises.push(
+                    renderPromise
+                        .then((bitmap) => {
+                            this.cache.set(key, bitmap);
+                        })
+                        .catch((e) => {
+                            console.error('[PdfCache] Failed preloadHighRes for page', index, e);
+                        })
+                        .finally(() => {
+                            this.rendering.delete(key);
+                        })
+                );
+            } else if (this.rendering.has(key)) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                promises.push(this.rendering.get(key)!.catch(() => { }) as any);
             }
         }
+        await Promise.allSettled(promises);
     }
 
-    /** LRU eviction: remove oldest entries beyond MAX_CACHE_SIZE. */
     private evictStale(): void {
         if (this.cache.size > PdfCacheManager.MAX_CACHE_SIZE) {
             const overflow = this.cache.size - PdfCacheManager.MAX_CACHE_SIZE;
@@ -156,7 +151,6 @@ export class PdfCacheManager {
         }
     }
 
-    /** Full teardown — called when a new PDF is loaded. */
     public clearAll(): void {
         for (const bmp of this.cache.values()) {
             bmp.close();

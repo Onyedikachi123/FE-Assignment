@@ -20,6 +20,7 @@ export function Toolbar() {
     const editor = useEditorInstance();
     const { currentPdfFile, pageCount } = useDocStore();
     const isUploading = useAppStore((s) => s.isUploading);
+    const uploadProgress = useAppStore((s) => s.uploadProgress);
 
     const [currentToolId, setCurrentToolId] = useState(editor?.getCurrentToolId() ?? 'select');
 
@@ -39,10 +40,10 @@ export function Toolbar() {
             const tag = (e.target as HTMLElement)?.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA') return;
             switch (e.key.toLowerCase()) {
-                case 'v': editor.setCurrentTool('select'); break;
-                case 'p': editor.setCurrentTool('pin'); break;
-                case 'c': editor.setCurrentTool('camera'); break;
-                case 'escape': editor.setCurrentTool('select'); break;
+                case 'v': editor.setCurrentTool('select'); setCurrentToolId('select'); break;
+                case 'p': editor.setCurrentTool('pin'); setCurrentToolId('pin'); break;
+                case 'c': editor.setCurrentTool('camera'); setCurrentToolId('camera'); break;
+                case 'escape': editor.setCurrentTool('select'); setCurrentToolId('select'); break;
             }
         };
 
@@ -86,14 +87,34 @@ export function Toolbar() {
                 }}
             >
                 {isUploading ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{
-                            width: 10, height: 10, borderRadius: '50%',
-                            background: '#6366f1', animation: 'pulse 1s infinite',
-                        }} />
-                        <span style={{ fontSize: 14, fontWeight: 600, color: '#4f46e5' }}>
-                            Processing PDF…
-                        </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 200 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{
+                                    width: 10, height: 10, borderRadius: '50%',
+                                    background: '#6366f1', animation: 'pulse 1s infinite',
+                                }} />
+                                <span style={{ fontSize: 13, fontWeight: 600, color: '#4f46e5' }}>
+                                    Processing PDF…
+                                </span>
+                            </div>
+                            {uploadProgress && (
+                                <span style={{ fontSize: 11, fontWeight: 700, color: '#6366f1' }}>
+                                    {Math.round((uploadProgress.loaded / uploadProgress.total) * 100)}%
+                                </span>
+                            )}
+                        </div>
+                        {/* Determinate progress bar */}
+                        {uploadProgress && (
+                            <div style={{ width: '100%', height: 4, background: '#e0e7ff', borderRadius: 2, overflow: 'hidden' }}>
+                                <div style={{
+                                    width: `${(uploadProgress.loaded / uploadProgress.total) * 100}%`,
+                                    height: '100%',
+                                    background: '#6366f1',
+                                    transition: 'width 0.1s linear'
+                                }} />
+                            </div>
+                        )}
                     </div>
                 ) : currentPdfFile ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -170,11 +191,11 @@ export function Toolbar() {
                         <button
                             key={t.id}
                             data-testid={`tool-btn-${t.id}`}
+                            data-active={isActive}
                             title={`${t.label} (${t.shortcut})`}
                             onClick={() => {
                                 editor.setCurrentTool(t.id);
-                                // Force a tiny re-render so the active state updates visually
-                                // (since we're outside tldraw's reactive tree)
+                                setCurrentToolId(t.id);
                             }}
                             style={{
                                 width: 48,

@@ -1,7 +1,6 @@
 import {
     BindingUtil,
     BindingOnShapeChangeOptions,
-    BindingOnDeleteOptions,
     TLBaseBinding,
     createBindingValidator,
     T,
@@ -13,13 +12,10 @@ export interface PinAttachBindingProps {
 }
 
 /**
- * PinAttachBinding type.
- * Using TLBaseBinding with 'pin-attach' type and our custom props.
- * TLGlobalBindingPropsMap is augmented via module declaration below.
+ * PinAttachBinding
  */
 export type PinAttachBinding = TLBaseBinding<'pin-attach', PinAttachBindingProps>;
 
-// Augment tldraw's global binding type registry so our custom type is recognised
 declare module 'tldraw' {
     interface TLGlobalBindingPropsMap {
         'pin-attach': PinAttachBindingProps;
@@ -28,13 +24,6 @@ declare module 'tldraw' {
 
 /**
  * PinAttachBindingUtil
- *
- * The authoritative, undo-safe implementation of shape attachment.
- * Uses tldraw's native BindingUtil system (Option C) — executed synchronously
- * within the same store transaction so CMD+Z perfectly reverts both shapes.
- *
- * Loop prevention: The `syncing` Set tracks which shape IDs are currently
- * being updated by us so we don't re-enter the handler infinitely.
  */
 export class PinAttachBindingUtil extends BindingUtil<PinAttachBinding> {
     static override type = 'pin-attach' as const;
@@ -48,18 +37,15 @@ export class PinAttachBindingUtil extends BindingUtil<PinAttachBinding> {
         };
     }
 
+
     validator = createBindingValidator(
-        'pin-attach' as any,
-        T.object({
+        'pin-attach',
+        {
             relativeOffset: T.object({ x: T.number, y: T.number }),
             pinShapeId: T.string,
-        }) as any
+        }
     );
 
-    /**
-     * Called when the "from" shape (shapeA) changes.
-     * We update the "to" shape (shapeB) to maintain the stored relative offset.
-     */
     override onAfterChangeFromShape({
         binding,
         shapeBefore,
@@ -67,27 +53,27 @@ export class PinAttachBindingUtil extends BindingUtil<PinAttachBinding> {
     }: BindingOnShapeChangeOptions<PinAttachBinding>): void {
         if (this.syncing.has(binding.fromId)) return;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const before = shapeBefore as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const after = shapeAfter as any;
         if (before.x === after.x && before.y === after.y) return;
 
-        const toShape = this.editor.getShape(binding.toId) as any;
+        const toShape = this.editor.getShape(binding.toId);
         if (!toShape) return;
 
         this.syncing.add(binding.toId);
         this.editor.updateShape({
             id: toShape.id,
-            type: toShape.type as any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            type: (toShape as any).type,
             x: after.x - binding.props.relativeOffset.x,
             y: after.y - binding.props.relativeOffset.y,
-        });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
         this.syncing.delete(binding.toId);
     }
 
-    /**
-     * Called when the "to" shape (shapeB) changes.
-     * We update the "from" shape (shapeA) to maintain the stored relative offset.
-     */
     override onAfterChangeToShape({
         binding,
         shapeBefore,
@@ -95,24 +81,28 @@ export class PinAttachBindingUtil extends BindingUtil<PinAttachBinding> {
     }: BindingOnShapeChangeOptions<PinAttachBinding>): void {
         if (this.syncing.has(binding.toId)) return;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const before = shapeBefore as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const after = shapeAfter as any;
         if (before.x === after.x && before.y === after.y) return;
 
-        const fromShape = this.editor.getShape(binding.fromId) as any;
+        const fromShape = this.editor.getShape(binding.fromId);
         if (!fromShape) return;
 
         this.syncing.add(binding.fromId);
         this.editor.updateShape({
             id: fromShape.id,
-            type: fromShape.type as any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            type: (fromShape as any).type,
             x: after.x + binding.props.relativeOffset.x,
             y: after.y + binding.props.relativeOffset.y,
-        });
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
         this.syncing.delete(binding.fromId);
     }
 
-    override onBeforeDelete(_options: BindingOnDeleteOptions<PinAttachBinding>): void {
-        // Intentionally empty — detaching is the correct behaviour when a pin is removed
+    override onBeforeDelete(): void {
+        // Detaching is correct
     }
 }

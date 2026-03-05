@@ -3,20 +3,11 @@
 import { useEffect, useState } from 'react';
 import { Camera, Clipboard, Download, X } from 'lucide-react';
 import { useAppStore } from '../state/useAppStore';
-import { executeCropExport } from '../core/engine/tools/CameraTool';
+import { executeCropExport } from '../core/engine/tools/CameraExport';
 import { useEditorInstance } from '../core/engine/EditorContext';
 
 /**
  * CameraActionBar
- *
- * Renders after the user draws a crop region with the Camera tool.
- * Evaluates screen position outside of <Tldraw> by subscribing directly
- * to editor.store to react to panning and zoom.
- *
- * Actions:
- * - Save PNG: export to file download
- * - Copy: export to clipboard (modern browsers only)
- * - Cancel: delete crop shape, clear state
  */
 export function CameraActionBar() {
     const editor = useEditorInstance();
@@ -43,7 +34,6 @@ export function CameraActionBar() {
         };
 
         updateScreenPos();
-        // Subscribe to store changes so the bar moves when the user pans/zooms the camera
         const unsubscribe = editor.store.listen(updateScreenPos);
 
         return unsubscribe;
@@ -52,21 +42,22 @@ export function CameraActionBar() {
     if (!editor || !cropBoxBounds || !screenPos) return null;
 
     const cancel = () => {
-        if (cropShapeId) editor.deleteShape(cropShapeId as any);
+        if (cropShapeId) editor.deleteShape(cropShapeId);
         setCropBox(null, null);
         editor.setCurrentTool('select');
     };
 
     const exportAs = async (target: 'download' | 'clipboard') => {
         setIsExporting(true);
+        const addToast = useAppStore.getState().addToast;
         try {
             await executeCropExport(editor, cropBoxBounds, target);
         } catch (e) {
             console.error('[CameraActionBar] Export error:', e);
+            addToast('Export failed. Please try again.', 'error');
         } finally {
             setIsExporting(false);
-            // Clean up after export
-            if (cropShapeId) editor.deleteShape(cropShapeId as any);
+            if (cropShapeId) editor.deleteShape(cropShapeId);
             setCropBox(null, null);
             editor.setCurrentTool('select');
         }
