@@ -1,4 +1,5 @@
 import { HTMLContainer, Rectangle2d, ShapeUtil, TLBaseShape, toDomPrecision } from 'tldraw';
+import { executeCropExport } from '../../tools/CameraExport';
 
 export type TLCameraShape = TLBaseShape<
     'camera',
@@ -25,7 +26,7 @@ export class CameraShapeUtil extends ShapeUtil<any> {
 
     override canBind() { return false; }
     override canEdit() { return false; }
-    override canResize() { return false; }
+    override canResize() { return true; }
     canRotate() { return false; }
 
     override getGeometry(shape: TLCameraShape) {
@@ -38,6 +39,24 @@ export class CameraShapeUtil extends ShapeUtil<any> {
 
     override component(shape: TLCameraShape) {
         const { w, h } = shape.props;
+        const editor = this.editor;
+        const isSelected = editor.getOnlySelectedShapeId() === shape.id;
+
+        const handleExport = async (e: React.MouseEvent) => {
+            e.stopPropagation();
+            try {
+                const { x, y } = shape;
+                const { w, h } = shape.props;
+                await executeCropExport(editor, { x, y, w, h }, 'download');
+            } catch (err) {
+                console.error('[CameraShape] Export failed:', err);
+            }
+        };
+
+        const handleDiscard = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            editor.deleteShape(shape.id);
+        };
 
         return (
             <HTMLContainer id={shape.id}>
@@ -46,22 +65,67 @@ export class CameraShapeUtil extends ShapeUtil<any> {
                     style={{
                         width: w,
                         height: h,
-                        border: '1.5px solid #1e293b', // Professional slate border
-                        background: 'transparent',
-                        borderRadius: '8px', // Rounded rectangle parity with demo
-                        // Create a "spotlight" effect by dimming everything outside the crop
-                        boxShadow: '0 0 0 10000px rgba(15, 23, 42, 0.4)',
-                        pointerEvents: 'none',
+                        border: '2px solid #6366f1',
+                        background: 'rgba(99, 102, 241, 0.05)',
+                        borderRadius: '0px',
+                        boxShadow: isSelected ? '0 0 0 10000px rgba(15, 23, 42, 0.4)' : 'none',
+                        pointerEvents: 'all',
                         transition: 'box-shadow 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxSizing: 'border-box'
                     }}
                 >
-                    {/* Interior "safe area" highlight */}
-                    <div style={{
-                        position: 'absolute',
-                        inset: 0,
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        borderRadius: '6.5px',
-                    }} />
+                    {isSelected && (
+                        <div style={{
+                            position: 'absolute',
+                            bottom: -50,
+                            display: 'flex',
+                            gap: 8,
+                            background: 'white',
+                            padding: '6px 12px',
+                            borderRadius: 12,
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                            pointerEvents: 'all',
+                            zIndex: 1000
+                        }}>
+                            <button
+                                onClick={handleExport}
+                                style={{
+                                    background: '#6366f1',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '6px 12px',
+                                    borderRadius: 6,
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4
+                                }}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                                Export PNG
+                            </button>
+                            <button
+                                onClick={handleDiscard}
+                                style={{
+                                    background: '#f1f5f9',
+                                    color: '#64748b',
+                                    border: 'none',
+                                    padding: '6px 12px',
+                                    borderRadius: 6,
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Discard
+                            </button>
+                        </div>
+                    )}
                 </div>
             </HTMLContainer>
         );

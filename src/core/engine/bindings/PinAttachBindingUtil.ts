@@ -51,8 +51,9 @@ export class PinAttachBindingUtil extends BindingUtil<PinAttachBinding> {
         shapeBefore,
         shapeAfter,
     }: BindingOnShapeChangeOptions<PinAttachBinding>): void {
-        if (this.syncing.has(binding.fromId)) return;
+        if (this.syncing.has(binding.id)) return;
 
+        // The 'from' shape is the PIN in our new hub-and-spoke model.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const before = shapeBefore as any;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -62,16 +63,21 @@ export class PinAttachBindingUtil extends BindingUtil<PinAttachBinding> {
         const toShape = this.editor.getShape(binding.toId);
         if (!toShape) return;
 
-        this.syncing.add(binding.toId);
+        const targetX = after.x + binding.props.relativeOffset.x;
+        const targetY = after.y + binding.props.relativeOffset.y;
+
+        if (toShape.x === targetX && toShape.y === targetY) return;
+
+        this.syncing.add(binding.id);
         this.editor.updateShape({
             id: toShape.id,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             type: (toShape as any).type,
-            x: after.x - binding.props.relativeOffset.x,
-            y: after.y - binding.props.relativeOffset.y,
+            x: targetX,
+            y: targetY,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any);
-        this.syncing.delete(binding.toId);
+        this.syncing.delete(binding.id);
     }
 
     override onAfterChangeToShape({
@@ -79,27 +85,33 @@ export class PinAttachBindingUtil extends BindingUtil<PinAttachBinding> {
         shapeBefore,
         shapeAfter,
     }: BindingOnShapeChangeOptions<PinAttachBinding>): void {
-        if (this.syncing.has(binding.toId)) return;
+        if (this.syncing.has(binding.id)) return;
 
+        // The 'to' shape is the SHAPE.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const before = shapeBefore as any;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const after = shapeAfter as any;
         if (before.x === after.x && before.y === after.y) return;
 
-        const fromShape = this.editor.getShape(binding.fromId);
-        if (!fromShape) return;
+        const pinShape = this.editor.getShape(binding.fromId);
+        if (!pinShape) return;
 
-        this.syncing.add(binding.fromId);
+        const targetX = after.x - binding.props.relativeOffset.x;
+        const targetY = after.y - binding.props.relativeOffset.y;
+
+        if (pinShape.x === targetX && pinShape.y === targetY) return;
+
+        this.syncing.add(binding.id);
         this.editor.updateShape({
-            id: fromShape.id,
+            id: pinShape.id,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            type: (fromShape as any).type,
-            x: after.x + binding.props.relativeOffset.x,
-            y: after.y + binding.props.relativeOffset.y,
+            type: (pinShape as any).type,
+            x: targetX,
+            y: targetY,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any);
-        this.syncing.delete(binding.fromId);
+        this.syncing.delete(binding.id);
     }
 
     override onBeforeDelete(): void {

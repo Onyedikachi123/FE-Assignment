@@ -2,64 +2,84 @@
 
 import { useEffect, useState } from 'react';
 import { Camera, Clipboard, Download, X } from 'lucide-react';
+import { TLShape } from 'tldraw';
 import { useAppStore } from '../state/useAppStore';
 import { executeCropExport } from '../core/engine/tools/CameraExport';
 import { useEditorInstance } from '../core/engine/EditorContext';
 
 /**
  * CameraActionBar
+ * Floats near the active Selection Region.
  */
 export function CameraActionBar() {
     const editor = useEditorInstance();
-    const cropBoxBounds = useAppStore((s) => s.cropBoxBounds);
-    const cropShapeId = useAppStore((s) => s.cropShapeId);
-    const setCropBox = useAppStore((s) => s.setCropBox);
-
+    const [selectedRegion, setSelectedRegion] = useState<TLShape | null>(null);
     const [isExporting, setIsExporting] = useState(false);
     const [screenPos, setScreenPos] = useState<{ x: number; y: number } | null>(null);
 
     useEffect(() => {
-        if (!editor || !cropBoxBounds) {
-            setScreenPos(null);
-            return;
-        }
+        if (!editor) return;
 
-        const updateScreenPos = () => {
-            setScreenPos(
-                editor.pageToScreen({
-                    x: cropBoxBounds.x + cropBoxBounds.w,
-                    y: cropBoxBounds.y + cropBoxBounds.h,
-                })
-            );
+        const update = () => {
+            const selected = editor.getSelectedShapes();
+            const region = selected.find(s => (s as unknown as { type: string }).type === 'selection-region');
+
+            if (region) {
+                setSelectedRegion(region);
+                const pageBounds = editor.getShapePageBounds(region);
+                if (pageBounds) {
+                    setScreenPos(editor.pageToScreen({
+                        x: pageBounds.maxX,
+                        y: pageBounds.maxY,
+                    }));
+                } else {
+                    setScreenPos(null);
+                }
+            } else {
+                setSelectedRegion(null);
+                setScreenPos(null);
+            }
         };
 
-        updateScreenPos();
-        const unsubscribe = editor.store.listen(updateScreenPos);
-
+        update();
+        const unsubscribe = editor.store.listen(update);
         return unsubscribe;
-    }, [editor, cropBoxBounds]);
+    }, [editor]);
 
-    if (!editor || !cropBoxBounds || !screenPos) return null;
+    if (!editor || !selectedRegion || !screenPos) return null;
+
+    const regionProps = (selectedRegion as unknown as { props: { w: number, h: number } }).props;
 
     const cancel = () => {
-        if (cropShapeId) editor.deleteShape(cropShapeId);
-        setCropBox(null, null);
-        editor.setCurrentTool('select');
+        editor.deleteShape(selectedRegion.id);
+        editor.setCurrentTool('selection');
     };
 
     const exportAs = async (target: 'download' | 'clipboard') => {
         setIsExporting(true);
         const addToast = useAppStore.getState().addToast;
+        const pageBounds = editor.getShapePageBounds(selectedRegion);
+
+        if (!pageBounds) {
+            addToast('Selection bounds lost. Try again.', 'error');
+            setIsExporting(false);
+            return;
+        }
+
         try {
-            await executeCropExport(editor, cropBoxBounds, target);
+            await executeCropExport(editor, {
+                x: pageBounds.x,
+                y: pageBounds.y,
+                w: pageBounds.w,
+                h: pageBounds.h
+            }, target);
         } catch (e) {
             console.error('[CameraActionBar] Export error:', e);
             addToast('Export failed. Please try again.', 'error');
         } finally {
             setIsExporting(false);
-            if (cropShapeId) editor.deleteShape(cropShapeId);
-            setCropBox(null, null);
-            editor.setCurrentTool('select');
+            editor.deleteShape(selectedRegion.id);
+            editor.setCurrentTool('selection');
         }
     };
 
@@ -85,7 +105,7 @@ export function CameraActionBar() {
         >
             <Camera size={14} color="#94a3b8" />
             <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500, marginRight: 4 }}>
-                {Math.round(cropBoxBounds.w)} × {Math.round(cropBoxBounds.h)}
+                {Math.round(regionProps.w)} × {Math.round(regionProps.h)}
             </span>
             <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.1)' }} />
 

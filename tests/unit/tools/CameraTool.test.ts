@@ -11,13 +11,19 @@ vi.mock('../../../src/state/useAppStore', () => ({
     }
 }));
 
-// Now we can safely import CameraTool without heavy PDF dependencies
+// Mock the export logic
+vi.mock('../../../src/core/engine/tools/CameraExport', () => ({
+    executeCropExport: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Now we can safely import CameraTool
 import { CameraTool } from '../../../src/core/engine/tools/CameraTool';
 
 /**
- * CameraTool Tests
+ * CameraTool (Instant Capture) Tests
+ * - Verifies the "Screen Capture" behavior.
  */
-describe('CameraTool', () => {
+describe('CameraTool (Instant Capture)', () => {
     let editor: Editor;
     let cameraTool: CameraTool;
     const startPoint = { x: 100, y: 100 };
@@ -30,69 +36,54 @@ describe('CameraTool', () => {
             deleteShape: vi.fn(),
             getShape: vi.fn(),
             setCurrentTool: vi.fn(),
-            getCurrentPageShapes: vi.fn().mockReturnValue([]),
+            setSelectedShapes: vi.fn(),
+            markHistoryStoppingPoint: vi.fn(),
         } as unknown as Editor;
 
-        // Initialize tool manually for testing
+        // Initialize tool
         cameraTool = new CameraTool(editor);
     });
 
-    it('creates a "camera" shape on pointer down', () => {
+    it('creates a "capture-region" shape on pointer down', () => {
         const info = { point: startPoint } as TLPointerEventInfo;
         cameraTool.onPointerDown(info);
 
         expect(editor.createShape).toHaveBeenCalledWith(
             expect.objectContaining({
-                type: 'camera',
+                type: 'capture-region',
                 x: 100,
                 y: 100,
             })
         );
     });
 
-    it('updates "camera" shape bounds on pointer move', () => {
-        cameraTool.onPointerDown({ point: startPoint } as TLPointerEventInfo);
+    it('triggers export and cleanup on pointer up', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let createdId: any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (editor.createShape as any).mockImplementation((args: any) => {
+            createdId = args.id;
+        });
 
-        const movePoint = { x: 250, y: 300 }; // w=150, h=200
-        cameraTool.onPointerMove({ point: movePoint, shiftKey: false } as TLPointerEventInfo);
+        const info = { point: startPoint } as TLPointerEventInfo;
+        cameraTool.onPointerDown(info);
 
-        expect(editor.updateShape).toHaveBeenCalledWith(
-            expect.objectContaining({
-                type: 'camera',
-                x: 100,
-                y: 100,
-                props: { w: 150, h: 200 }
-            })
-        );
-    });
+        const mockRegion = {
+            id: createdId,
+            type: 'capture-region',
+            x: 100, y: 100,
+            props: { w: 200, h: 200 }
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vi.spyOn(editor, 'getShape').mockReturnValue(mockRegion as any);
 
-    it('constrains to a 1:1 square when Shift is held', () => {
-        cameraTool.onPointerDown({ point: startPoint } as TLPointerEventInfo);
+        // Execute capture
+        await cameraTool.onPointerUp();
 
-        const movePoint = { x: 300, y: 250 }; // Attempt 200x150
-        cameraTool.onPointerMove({ point: movePoint, shiftKey: true } as TLPointerEventInfo);
+        const { executeCropExport } = await import('../../../src/core/engine/tools/CameraExport');
+        expect(executeCropExport).toHaveBeenCalledWith(editor, { x: 100, y: 100, w: 200, h: 200 }, 'download');
 
-        // Should lock to min side (150) -> 150x150
-        expect(editor.updateShape).toHaveBeenCalledWith(
-            expect.objectContaining({
-                props: { w: 150, h: 150 }
-            })
-        );
-    });
-
-    it('handles negative movement (dragging up/left) correctly', () => {
-        cameraTool.onPointerDown({ point: startPoint } as TLPointerEventInfo);
-
-        const movePoint = { x: 50, y: 50 }; // Dragging -50 in both axes
-        cameraTool.onPointerMove({ point: movePoint, shiftKey: false } as TLPointerEventInfo);
-
-        // Bounds should be at x=50, y=50, w=50, h=50
-        expect(editor.updateShape).toHaveBeenCalledWith(
-            expect.objectContaining({
-                x: 50,
-                y: 50,
-                props: { w: 50, h: 50 }
-            })
-        );
+        // Verify cleanup precisely with the dynamic ID
+        expect(editor.deleteShape).toHaveBeenCalledWith(createdId);
     });
 });

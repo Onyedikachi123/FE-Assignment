@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Camera, MapPin, MousePointer2, Upload } from 'lucide-react';
+import { Camera, MapPin, MousePointer2, Square, Upload } from 'lucide-react';
 import { useDocStore } from '../state/useDocStore';
 import { useAppStore } from '../state/useAppStore';
 import { useEditorInstance } from '../core/engine/EditorContext';
@@ -22,7 +22,10 @@ export function Toolbar() {
     const isUploading = useAppStore((s) => s.isUploading);
     const uploadProgress = useAppStore((s) => s.uploadProgress);
 
-    const [currentToolId, setCurrentToolId] = useState(editor?.getCurrentToolId() ?? 'select');
+    // 'currentToolId' starts as null to satisfy the "from start it should be unclick" requirement.
+    // The editor actually defaults to 'select', but the UI won't show it as active until a click.
+    const [currentToolId, setCurrentToolId] = useState<string | null>(null);
+    const [hasInteracted, setHasInteracted] = useState(false);
 
     // Keyboard shortcuts and tool state sync
     useEffect(() => {
@@ -32,6 +35,8 @@ export function Toolbar() {
         const unsubscribe = editor.store.listen(() => {
             const toolId = editor.getCurrentToolId();
             if (toolId !== currentToolId) {
+                // If it's the first time we see a tool change, or it's not 'select' anymore,
+                // we might want to show it. But let's stick to explicit user clicks for high-lighting 'select'.
                 setCurrentToolId(toolId);
             }
         });
@@ -42,7 +47,11 @@ export function Toolbar() {
             switch (e.key.toLowerCase()) {
                 case 'v': editor.setCurrentTool('select'); setCurrentToolId('select'); break;
                 case 'p': editor.setCurrentTool('pin'); setCurrentToolId('pin'); break;
-                case 'c': editor.setCurrentTool('camera'); setCurrentToolId('camera'); break;
+                case 'c': {
+                    editor.setCurrentTool('camera');
+                    setCurrentToolId('camera');
+                    break;
+                }
                 case 'escape': editor.setCurrentTool('select'); setCurrentToolId('select'); break;
             }
         };
@@ -52,14 +61,66 @@ export function Toolbar() {
             window.removeEventListener('keydown', handleKeyDown);
             unsubscribe();
         };
-    }, [editor, currentToolId]);
+    }, [editor, currentToolId, hasInteracted]);
 
     if (!editor) return null;
 
+    const handleToolClick = (toolId: string) => {
+        setHasInteracted(true);
+        const selection = editor.getSelectedShapes();
+
+        // 🎯 "The Select Tool (V) should also be the one use to create the shapes..."
+        // If we have a selection while clicking Pin/Camera, we treat them as IMMEDIATE ACTIONS
+        // rather than switching tools.
+        if (selection.length > 0) {
+            if (toolId === 'pin' && selection.length >= 2) {
+                // Create pin at center of selection
+                const bounds = editor.getSelectionPageBounds();
+                if (bounds) {
+                    const pinId = editor.createShape({
+                        type: 'pin',
+                        x: bounds.center.x,
+                        y: bounds.center.y,
+                        props: { attachedShapeIds: selection.map(s => s.id) }
+                    } as any);
+                    // Bind them
+                    selection.forEach(s => {
+                        editor.createBinding({
+                            type: 'pin-attach',
+                            fromId: pinId,
+                            toId: s.id,
+                            props: { relativeOffset: { x: s.x - bounds.center.x, y: s.y - bounds.center.y }, pinShapeId: pinId }
+                        } as any);
+                    });
+                    useAppStore.getState().addToast(`Pinned ${selection.length} shapes.`, 'success');
+                    return;
+                }
+            } else if (toolId === 'camera') {
+                // Create camera over selection
+                const bounds = editor.getSelectionPageBounds();
+                if (bounds) {
+                    editor.createShape({
+                        type: 'camera',
+                        x: bounds.minX - 10,
+                        y: bounds.minY - 10,
+                        props: { w: bounds.width + 20, h: bounds.height + 20 }
+                    } as any);
+                    useAppStore.getState().addToast('Camera created over selection.', 'success');
+                    return;
+                }
+            }
+        }
+
+        // Default: Switch tool
+        editor.setCurrentTool(toolId);
+        setCurrentToolId(toolId);
+    };
+
     const tools = [
-        { id: 'select', icon: <MousePointer2 size={20} />, label: 'Select', shortcut: 'V' },
-        { id: 'pin', icon: <MapPin size={20} />, label: 'Pin', shortcut: 'P' },
-        { id: 'camera', icon: <Camera size={20} />, label: 'Capture', shortcut: 'C' },
+        { id: 'select', icon: <MousePointer2 size={20} />, label: 'Select', shortcut: 'V', disabled: false },
+        { id: 'geo', icon: <Square size={20} />, label: 'Rectangle', shortcut: 'R', disabled: false },
+        { id: 'pin', icon: <MapPin size={20} />, label: 'Picker', shortcut: 'P', disabled: false },
+        { id: 'camera', icon: <Camera size={20} />, label: 'Capture', shortcut: 'C', disabled: false },
     ];
 
     return (
@@ -193,10 +254,8 @@ export function Toolbar() {
                             data-testid={`tool-btn-${t.id}`}
                             data-active={isActive}
                             title={`${t.label} (${t.shortcut})`}
-                            onClick={() => {
-                                editor.setCurrentTool(t.id);
-                                setCurrentToolId(t.id);
-                            }}
+                            disabled={t.disabled || isUploading}
+                            onClick={() => handleToolClick(t.id)}
                             style={{
                                 width: 48,
                                 height: 48,
@@ -206,13 +265,14 @@ export function Toolbar() {
                                 justifyContent: 'center',
                                 borderRadius: 16,
                                 border: 'none',
-                                cursor: 'pointer',
                                 position: 'relative',
                                 transition: 'all 0.18s ease',
-                                background: isActive ? '#6366f1' : 'transparent',
-                                color: isActive ? '#ffffff' : '#64748b',
-                                boxShadow: isActive ? '0 4px 16px rgba(99,102,241,0.4)' : 'none',
-                                transform: isActive ? 'scale(1.08)' : 'scale(1)',
+                                background: (hasInteracted && isActive) ? '#6366f1' : 'transparent',
+                                color: (hasInteracted && isActive) ? '#ffffff' : (t.disabled ? '#cbd5e1' : '#64748b'),
+                                boxShadow: (hasInteracted && isActive) ? '0 4px 16px rgba(99,102,241,0.4)' : 'none',
+                                transform: (hasInteracted && isActive) ? 'scale(1.08)' : 'scale(1)',
+                                opacity: t.disabled ? 0.5 : 1,
+                                cursor: t.disabled ? 'not-allowed' : 'pointer',
                             }}
                             onMouseEnter={(e) => {
                                 if (!isActive) {
@@ -234,8 +294,8 @@ export function Toolbar() {
                                 bottom: -2, right: -2,
                                 fontSize: 9, fontWeight: 800,
                                 padding: '1px 4px', borderRadius: 4,
-                                background: isActive ? 'white' : '#e2e8f0',
-                                color: isActive ? '#6366f1' : '#64748b',
+                                background: (hasInteracted && isActive) ? 'white' : '#e2e8f0',
+                                color: (hasInteracted && isActive) ? '#6366f1' : '#64748b',
                                 lineHeight: 1.4,
                             }}>
                                 {t.shortcut}

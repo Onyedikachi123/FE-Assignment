@@ -7,6 +7,7 @@ export type TLPinShape = TLBaseShape<
         h: number;
         text: string;
         color: string;
+        attachedShapeIds: string[];
     }
 >;
 
@@ -18,7 +19,7 @@ export class PinShapeUtil extends ShapeUtil<any> {
     static override type = 'pin' as const;
 
     override getDefaultProps(): TLPinShape['props'] {
-        return { w: 32, h: 32, text: '', color: '#ef4444' };
+        return { w: 32, h: 32, text: '', color: '#ef4444', attachedShapeIds: [] };
     }
 
     override getGeometry(shape: TLPinShape) {
@@ -60,11 +61,35 @@ export class PinShapeUtil extends ShapeUtil<any> {
                         fill="none"
                         xmlns="http://www.w3.org/2000/svg"
                     >
+                        {shape.props.attachedShapeIds.length > 1 && (
+                            <circle cx="16" cy="10" r="14" stroke={shape.props.color} strokeWidth="2" strokeDasharray="4 2" />
+                        )}
                         <path
                             d="M16 0C10.4772 0 6 4.47715 6 10C6 15.5228 16 32 16 32C16 32 26 15.5228 26 10C26 4.47715 21.5228 0 16 0ZM16 14C13.7909 14 12 12.2091 12 10C12 7.79086 13.7909 6 16 6C18.2091 6 20 7.79086 20 10C20 12.2091 18.2091 14 16 14Z"
                             fill={shape.props.color}
                         />
                     </svg>
+
+                    {shape.props.attachedShapeIds.length > 0 && (
+                        <div style={{
+                            position: 'absolute',
+                            top: -10,
+                            right: -10,
+                            backgroundColor: shape.props.color,
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '20px',
+                            height: '20px',
+                            fontSize: '10px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '2px solid white',
+                            fontWeight: 'bold'
+                        }}>
+                            {shape.props.attachedShapeIds.length}
+                        </div>
+                    )}
 
                     {isSelected && (
                         <div

@@ -18,7 +18,7 @@ function ToastItem({ toast }: { toast: ToastMessage }) {
     };
 
     return (
-        <div style={{ pointerEvents: 'auto' }} className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg transition-all animate-in slide-in-from-bottom-5 fade-in ${bgColors[toast.type]}`}>
+        <div data-testid="toast-message" style={{ pointerEvents: 'auto' }} className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg transition-all animate-in slide-in-from-bottom-5 fade-in ${bgColors[toast.type]}`}>
             <span className="text-sm font-semibold">{toast.message}</span>
             <button
                 onClick={() => removeToast(toast.id)}

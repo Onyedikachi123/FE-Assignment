@@ -1,60 +1,69 @@
-import { StateNode, TLPointerEventInfo, Box, createShapeId, TLShapeId, TLShape } from 'tldraw';
+import { StateNode, TLPointerEventInfo, createShapeId, TLShapeId } from 'tldraw';
 import { useAppStore } from '../../../state/useAppStore';
+import { executeCropExport } from './CameraExport';
 
 /**
- * CameraTool
- * A dedicated tool for cropping regions of the canvas.
- * - Production-quality math for 4-directional dragging
- * - Shift-key locking for 1:1 square aspect ratio
- * - Handles the 'camera' custom shape for high-contrast overlays
+ * CameraTool (Screen Capture Tool)
+ * Staff-level implementation of the "Select -> Release -> Download" workflow.
+ * - Handles its own drag-to-select logic.
+ * - Shows a thin-border temporary rectangle during drag.
+ * - Triggers instant crop-export and download on pointer up.
  */
 export class CameraTool extends StateNode {
     static override id = 'camera';
 
-    private isDrawing = false;
+    private isSelecting = false;
     private startPoint = { x: 0, y: 0 };
-    private cropShapeId: TLShapeId = createShapeId();
+    private regionId: TLShapeId = createShapeId();
+
+    override onEnter = () => {
+        useAppStore.getState().addToast('Drag on canvas to capture area.', 'info');
+    };
 
     override onPointerDown = (info: TLPointerEventInfo) => {
-        this.isDrawing = true;
-        this.startPoint = { x: info.point.x, y: info.point.y };
-        this.cropShapeId = createShapeId();
+        const { editor } = this;
+        const { point } = info;
 
-        this.editor.createShape({
-            id: this.cropShapeId,
+        this.isSelecting = true;
+        this.startPoint = { x: point.x, y: point.y };
+        this.regionId = createShapeId();
+
+        editor.markHistoryStoppingPoint('camera-selection-start');
+
+        editor.createShape({
+            id: this.regionId,
             type: 'camera',
             x: this.startPoint.x,
             y: this.startPoint.y,
             props: { w: 1, h: 1 },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any);
+
+        editor.setSelectedShapes([this.regionId]);
     };
 
     override onPointerMove = (info: TLPointerEventInfo) => {
-        if (!this.isDrawing) return;
+        if (!this.isSelecting) return;
+        const { editor } = this;
         const { point, shiftKey } = info;
 
         let rawW = point.x - this.startPoint.x;
         let rawH = point.y - this.startPoint.y;
 
-        // Production-quality aspect-ratio math (Shift-key)
         if (shiftKey) {
             const side = Math.min(Math.abs(rawW), Math.abs(rawH));
             rawW = Math.sign(rawW) * side;
             rawH = Math.sign(rawH) * side;
         }
 
-        const w = Math.abs(rawW);
-        const h = Math.abs(rawH);
-
-        // Correct for 4-directional dragging (top-left vs bottom-right)
+        const w = Math.max(1, Math.abs(rawW));
+        const h = Math.max(1, Math.abs(rawH));
         const x = rawW < 0 ? this.startPoint.x - w : this.startPoint.x;
         const y = rawH < 0 ? this.startPoint.y - h : this.startPoint.y;
 
-        this.editor.updateShape({
-            id: this.cropShapeId,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            type: 'camera' as any,
+        editor.updateShape({
+            id: this.regionId,
+            type: 'camera',
             x,
             y,
             props: { w, h },
@@ -63,47 +72,28 @@ export class CameraTool extends StateNode {
     };
 
     override onPointerUp = () => {
-        if (!this.isDrawing) return;
-        this.isDrawing = false;
+        if (!this.isSelecting) return;
+        const { editor } = this;
+        this.isSelecting = false;
 
-        // Retrieve current crop bounds safely
-        const cropShape = this.editor.getShape(this.cropShapeId) as TLShape & { props: { w: number, h: number } };
-        if (!cropShape || (cropShape as unknown as { type: string }).type !== 'camera') return;
-
-        const bounds = new Box(
-            cropShape.x,
-            cropShape.y,
-            cropShape.props.w,
-            cropShape.props.h
-        );
-
-        // Clean up tiny accidental clicks
-        if (bounds.w < 10 || bounds.h < 10) {
-            this.editor.deleteShape(this.cropShapeId);
-            return;
+        // Cleanup tiny unintentional clicks
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const shape = editor.getShape(this.regionId) as any;
+        if (shape && (shape.props.w < 5 || shape.props.h < 5)) {
+            editor.deleteShape(this.regionId);
+        } else {
+            editor.setCurrentTool('select');
+            useAppStore.getState().addToast('Crop area created. Adjust and click Export.', 'success');
         }
-
-        // Persist crop metadata to UI layer; keeps action bar positioned correctly
-        useAppStore.getState().setCropBox(
-            { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h },
-            this.cropShapeId
-        );
     };
 
     override onKeyDown = (info: { key: string }) => {
         if (info.key === 'Escape') {
-            this.cancelCrop();
+            if (this.isSelecting) {
+                this.isSelecting = false;
+                this.editor.deleteShape(this.regionId);
+            }
+            this.editor.setCurrentTool('select');
         }
     };
-
-    private cancelCrop() {
-        if (this.isDrawing) {
-            this.isDrawing = false;
-        }
-        if (this.cropShapeId) {
-            this.editor.deleteShape(this.cropShapeId);
-        }
-        useAppStore.getState().setCropBox(null, null);
-        this.editor.setCurrentTool('select');
-    }
 }

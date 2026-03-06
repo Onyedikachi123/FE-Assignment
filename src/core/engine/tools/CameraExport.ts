@@ -15,13 +15,12 @@ export async function executeCropExport(
     const cropBounds = new Box(bounds.x, bounds.y, bounds.w, bounds.h);
 
     // Identify shapes within the region.
-    // We sort by depth to maintain visual stack integrity in export
     const intersectingShapeIds = editor
         .getCurrentPageShapesSorted()
         .filter((shape) => {
-            const geo = editor.getShapeGeometry(shape);
-            const shapeBounds = new Box(shape.x, shape.y, geo.bounds.w, geo.bounds.h);
-            return shapeBounds.collides(cropBounds) || cropBounds.includes(shapeBounds);
+            const pageBounds = editor.getShapePageBounds(shape);
+            if (!pageBounds) return false;
+            return pageBounds.collides(cropBounds) || cropBounds.includes(pageBounds);
         })
         .map((s) => s.id);
 
@@ -38,9 +37,8 @@ export async function executeCropExport(
     }
 
     // Capture standard high-res serialization from tldraw.
-    // Scale 2 ensures sharpness on Retina/4K displays.
-    const svgResult = await editor.getSvgString(
-        intersectingShapeIds.length > 0 ? intersectingShapeIds : Array.from(editor.getCurrentPageShapeIds()),
+    let svgResult = await editor.getSvgString(
+        intersectingShapeIds,
         {
             scale: 2,
             background: true,
@@ -48,6 +46,16 @@ export async function executeCropExport(
             padding: 0
         }
     );
+
+    // Fallback: If no shapes, generate a blank white SVG of the correct size
+    if (!svgResult || !svgResult.svg) {
+        svgResult = {
+            svg: `<svg width="${bounds.w * 2}" height="${bounds.h * 2}" viewBox="0 0 ${bounds.w} ${bounds.h}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="white"/></svg>`,
+            width: bounds.w * 2,
+            height: bounds.h * 2
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
+    }
 
     if (!svgResult || !svgResult.svg) {
         throw new Error('[CameraTool] SVG serialization failed');
@@ -76,6 +84,7 @@ export async function executeCropExport(
 
     await new Promise<void>((resolve, reject) => {
         canvas.toBlob(async (blob) => {
+            console.log('[CameraExport] Blob generated, starting download/clipboard task...');
             if (!blob) { reject(new Error('Export blob conversion failed')); return; }
 
             if (target === 'clipboard') {

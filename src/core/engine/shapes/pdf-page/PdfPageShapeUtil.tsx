@@ -1,4 +1,4 @@
-import { BaseBoxShapeUtil, HTMLContainer, TLBaseShape, toDomPrecision } from 'tldraw';
+import { HTMLContainer, Rectangle2d, ShapeUtil, TLBaseShape, toDomPrecision } from 'tldraw';
 import { pdfCacheManager } from '../../../pdf/PdfCache';
 import { pdfWorkerManager } from '../../../pdf/PdfWorkerManager';
 
@@ -15,11 +15,20 @@ export type TLPdfPageShape = TLBaseShape<
 /**
  * PdfPageShapeUtil
  */
-export class PdfPageShapeUtil extends BaseBoxShapeUtil<TLPdfPageShape> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export class PdfPageShapeUtil extends ShapeUtil<any> {
     static override type = 'pdf-page' as const;
 
     override getDefaultProps(): TLPdfPageShape['props'] {
         return { w: 595, h: 842, pageIndex: 1, error: false };
+    }
+
+    override getGeometry(shape: TLPdfPageShape) {
+        return new Rectangle2d({
+            width: shape.props.w,
+            height: shape.props.h,
+            isFilled: true,
+        });
     }
 
     override component(shape: TLPdfPageShape) {

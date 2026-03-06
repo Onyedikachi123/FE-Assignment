@@ -24,14 +24,14 @@ import { useDocStore } from '../../state/useDocStore';
 import { useAppStore } from '../../state/useAppStore';
 import { EditorContext } from './EditorContext';
 import { Toolbar } from '../../ui/Toolbar';
-import { CameraActionBar } from '../../ui/CameraActionBar';
 import { ToastViewer } from '../../ui/ToastViewer';
+import { SelectionActionBar } from './SelectionActionBar';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const customShapeUtils: readonly TLShapeUtilConstructor<any>[] = [
     PdfPageShapeUtil,
     PinShapeUtil,
-    CameraShapeUtil, // Dedicated Camera overlay util
+    CameraShapeUtil,
 ];
 const customTools: readonly TLStateNodeConstructor[] = [PinTool, CameraTool];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -234,7 +234,7 @@ export default function TldrawCanvas({ children }: { children?: React.ReactNode 
                 {editorReady && (
                     <>
                         <Toolbar />
-                        <CameraActionBar />
+                        <SelectionActionBar />
                         <ToastViewer />
                     </>
                 )}
