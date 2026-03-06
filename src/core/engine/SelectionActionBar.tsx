@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useEditorInstance } from './EditorContext';
 import { Box, createShapeId } from 'tldraw';
+import { executeCropExport } from './tools/CameraExport';
 import { MapPin, Camera } from 'lucide-react';
 import { useAppStore } from '../../state/useAppStore';
 
@@ -68,15 +69,14 @@ export function SelectionActionBar() {
     };
 
     const handleCamera = () => {
-        editor.createShape({
-            id: createShapeId(),
-            type: 'camera',
+        // 🎯 IMMEDIATE DOWNLOAD on selection
+        executeCropExport(editor, {
             x: bounds.minX - 20,
             y: bounds.minY - 20,
-            props: { w: bounds.width + 40, h: bounds.height + 40 }
-        } as any);
+            w: bounds.width + 40,
+            h: bounds.height + 40
+        }, 'download').catch((err: any) => console.error('[SelectionActionBar] Quick capture failed:', err));
 
-        useAppStore.getState().addToast('Camera region created over selection.', 'success');
         editor.selectNone();
     };
 

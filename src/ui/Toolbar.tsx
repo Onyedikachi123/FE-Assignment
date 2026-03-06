@@ -5,6 +5,7 @@ import { Camera, MapPin, MousePointer2, Square, Upload } from 'lucide-react';
 import { useDocStore } from '../state/useDocStore';
 import { useAppStore } from '../state/useAppStore';
 import { useEditorInstance } from '../core/engine/EditorContext';
+import { executeCropExport } from '../core/engine/tools/CameraExport';
 
 /**
  * Toolbar
@@ -96,16 +97,11 @@ export function Toolbar() {
                     return;
                 }
             } else if (toolId === 'camera') {
-                // Create camera over selection
+                // 🎯 IMMEDIATE DOWNLOAD on selection
                 const bounds = editor.getSelectionPageBounds();
                 if (bounds) {
-                    editor.createShape({
-                        type: 'camera',
-                        x: bounds.minX - 10,
-                        y: bounds.minY - 10,
-                        props: { w: bounds.width + 20, h: bounds.height + 20 }
-                    } as any);
-                    useAppStore.getState().addToast('Camera created over selection.', 'success');
+                    executeCropExport(editor, { x: bounds.minX - 10, y: bounds.minY - 10, w: bounds.width + 20, h: bounds.height + 20 }, 'download')
+                        .catch((err: any) => console.error('[Toolbar] Quick capture failed:', err));
                     return;
                 }
             }

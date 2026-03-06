@@ -71,19 +71,34 @@ export class CameraTool extends StateNode {
         } as any);
     };
 
-    override onPointerUp = () => {
+    override onPointerUp = async () => {
         if (!this.isSelecting) return;
         const { editor } = this;
         this.isSelecting = false;
 
-        // Cleanup tiny unintentional clicks
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const shape = editor.getShape(this.regionId) as any;
-        if (shape && (shape.props.w < 5 || shape.props.h < 5)) {
-            editor.deleteShape(this.regionId);
-        } else {
+        if (!shape || shape.type !== 'camera') return;
+
+        const { x, y } = shape;
+        const { w, h } = shape.props;
+
+        // Cleanup temporary shape immediately
+        editor.deleteShape(this.regionId);
+
+        // Cleanup tiny unintentional clicks
+        if (w < 5 || h < 5) {
             editor.setCurrentTool('select');
-            useAppStore.getState().addToast('Crop area created. Adjust and click Export.', 'success');
+            return;
+        }
+
+        // 🎯 THE CAPTURE PHASE
+        try {
+            await executeCropExport(editor, { x, y, w, h }, 'download');
+            editor.setCurrentTool('select');
+        } catch (e) {
+            console.error('[CameraTool] Capture failed:', e);
+            useAppStore.getState().addToast('Capture failed. Please try again.', 'error');
         }
     };
 
